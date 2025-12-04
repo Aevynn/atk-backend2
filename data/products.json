@@ -1,0 +1,5 @@
+[
+  { "id": 1, "name": "Pulpen Standard", "price": 3000, "stock": 20 },
+  { "id": 2, "name": "Pensil 2B", "price": 2500, "stock": 18 },
+  { "id": 3, "name": "Buku Tulis 40 Lembar", "price": 5000, "stock": 12 }
+]
