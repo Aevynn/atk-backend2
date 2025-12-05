@@ -1,0 +1,12 @@
+{
+  "users": [
+    { "username": "user", "password": "12345" },
+    { "username": "admin", "password": "admin" }
+  ],
+  "products": [
+    { "id": 1, "name": "Pulpen", "price": 3000, "stock": 50 },
+    { "id": 2, "name": "Pensil 2B", "price": 2000, "stock": 40 },
+    { "id": 3, "name": "Buku Tulis", "price": 5000, "stock": 60 }
+  ],
+  "cart": []
+}
