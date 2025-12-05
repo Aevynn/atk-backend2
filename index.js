@@ -44,3 +44,21 @@ app.patch("/update-stock", (req, res) => {
 /* SERVER LISTEN */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Backend running on port " + PORT));
+
+/* LOGIN */
+app.post("/login", (req, res) => {
+  const db = loadDB();
+  const { username, password } = req.body;
+
+  const user = db.users.find(
+    u => u.username === username && u.password === password
+  );
+
+  if (!user) return res.json({ success: false });
+
+  res.json({
+    success: true,
+    username: user.username,
+    role: user.username === "admin" ? "admin" : "user"
+  });
+});
