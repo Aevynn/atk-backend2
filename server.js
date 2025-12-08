@@ -1,166 +1,141 @@
-import express from "express";
-import fs from "fs";
-import cors from "cors";
-import bodyParser from "body-parser";
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// Utility read/write JSON
-function readJSON(path) {
-    return JSON.parse(fs.readFileSync(path));
+const DATA_DIR = path.join(__dirname, 'data');
+const USERS_F = path.join(DATA_DIR, 'users.json');
+const PRODUCTS_F = path.join(DATA_DIR, 'products.json');
+const TRANSACTIONS_F = path.join(DATA_DIR, 'transactions.json');
+
+function readJSON(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return [];
+  }
 }
-
-function writeJSON(path, data) {
-    fs.writeFileSync(path, JSON.stringify(data, null, 2));
+function writeJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
-
-// File paths
-const USERS = "./data/users.json";
-const PRODUCTS = "./data/products.json";
-const CART = "./data/transactions.json";
-const ORDERS = "./data/orders.json";
 
 // --- AUTH ---
-app.post("/auth/login", (req, res) => {
-    const { username, password } = req.body;
-    const users = readJSON(USERS);
-
-    const found = users.find(
-        u => u.username === username && u.password === password
-    );
-
-    if (!found) {
-        return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    res.json({
-        message: "Login success",
-        role: found.role,
-        username: found.username
-    });
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  const users = readJSON(USERS_F);
+  const user = users.find(u => u.username === username && u.password === password);
+  if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+  return res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
 });
 
-app.post("/auth/register", (req, res) => {
-    let users = readJSON(USERS);
-    const { username, password } = req.body;
-
-    if (users.find(u => u.username === username)) {
-        return res.status(400).json({ message: "User already exists" });
-    }
-
-    users.push({
-        username,
-        password,
-        role: "user"
-    });
-
-    writeJSON(USERS, users);
-    res.json({ message: "Registration success" });
+app.post('/auth/register', (req, res) => {
+  const { username, password } = req.body;
+  const users = readJSON(USERS_F);
+  if (users.find(u => u.username === username)) return res.status(400).json({ success: false, message: 'Username exists' });
+  const newUser = { id: Date.now(), username, password, role: 'user' };
+  users.push(newUser);
+  writeJSON(USERS_F, users);
+  res.json({ success: true, user: { id: newUser.id, username: newUser.username, role: newUser.role } });
 });
 
 // --- PRODUCTS ---
-app.get("/products", (req, res) => {
-    res.json(readJSON(PRODUCTS));
+app.get('/products', (req, res) => {
+  const products = readJSON(PRODUCTS_F);
+  res.json(products);
 });
 
-app.post("/products/updateStock", (req, res) => {
-    let data = readJSON(PRODUCTS);
-    const { id, newStock } = req.body;
-
-    const item = data.find(p => p.id === id);
-    if (!item) return res.status(404).json({ message: "Product not found" });
-
-    item.stock = newStock;
-    writeJSON(PRODUCTS, data);
-
-    res.json({ message: "Stock updated" });
+app.post('/products/add', (req, res) => {
+  const { name, price, stock } = req.body;
+  const products = readJSON(PRODUCTS_F);
+  const newP = { id: Date.now(), name, price: Number(price), stock: Number(stock || 0) };
+  products.push(newP);
+  writeJSON(PRODUCTS_F, products);
+  res.json({ success: true, product: newP });
 });
 
-app.post("/products/add", (req, res) => {
-    let data = readJSON(PRODUCTS);
-    const { name, price, stock } = req.body;
-
-    data.push({
-        id: Date.now(),
-        name,
-        price,
-        stock
-    });
-
-    writeJSON(PRODUCTS, data);
-
-    res.json({ message: "Product added" });
+app.post('/products/update', (req, res) => {
+  const { id, stock } = req.body;
+  const products = readJSON(PRODUCTS_F);
+  const p = products.find(x => Number(x.id) === Number(id));
+  if (!p) return res.status(404).json({ success: false, message: 'Product not found' });
+  p.stock = Number(stock);
+  writeJSON(PRODUCTS_F, products);
+  res.json({ success: true, product: p });
 });
 
-// --- CART / TRANSACTION ---
-app.post("/cart/checkout", (req, res) => {
+// --- CHECKOUT / CREATE TRANSACTION ---
+app.post('/checkout', (req, res) => {
+  try {
     const { username, cart } = req.body;
+    if (!cart || !Array.isArray(cart) || cart.length === 0) return res.status(400).json({ success: false, message: 'Cart empty' });
 
-    let products = readJSON(PRODUCTS);
-    let transactions = readJSON(CART);
-    let orders = readJSON(ORDERS);
+    const products = readJSON(PRODUCTS_F);
+    // validate and compute total
+    let total = 0;
+    for (const item of cart) {
+      const p = products.find(pr => Number(pr.id) === Number(item.id));
+      if (!p) return res.status(404).json({ success: false, message: `Product ${item.id} not found` });
+      if (p.stock < item.qty) return res.status(400).json({ success: false, message: `Insufficient stock for ${p.name}` });
+    }
 
-    // reduce stock
-    cart.forEach(item => {
-        const p = products.find(pr => pr.id === item.id);
-        if (p) p.stock -= item.qty;
-    });
+    // reduce stock and compute total
+    for (const item of cart) {
+      const p = products.find(pr => Number(pr.id) === Number(item.id));
+      p.stock -= item.qty;
+      total += p.price * item.qty;
+    }
+    writeJSON(PRODUCTS_F, products);
 
-    writeJSON(PRODUCTS, products);
+    // save transaction
+    const transactions = readJSON(TRANSACTIONS_F);
+    const newTrx = {
+      id: 'T-' + Date.now(),
+      username,
+      cart,
+      total,
+      status: 'Processing',
+      createdAt: new Date().toISOString()
+    };
+    transactions.push(newTrx);
+    writeJSON(TRANSACTIONS_F, transactions);
 
-    const orderID = Date.now();
-
-    // Save purchase
-    transactions.push({
-        id: orderID,
-        username,
-        items: cart,
-        status: "Processing",
-        date: new Date().toISOString()
-    });
-    writeJSON(CART, transactions);
-
-    // Save order tracking
-    orders.push({
-        id: orderID,
-        username,
-        status: "Processing",
-        history: [
-            { status: "Processing", date: new Date().toISOString() }
-        ]
-    });
-    writeJSON(ORDERS, orders);
-
-    res.json({ message: "Order created", orderID });
+    return res.json({ success: true, transaction: newTrx });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
-// --- ORDER STATUS ADMIN ---
-app.get("/admin/orders", (req, res) => {
-    res.json(readJSON(CART));
+// --- GET TRANSACTIONS (admin & client see all; client will filter by username) ---
+app.get('/transactions', (req, res) => {
+  const transactions = readJSON(TRANSACTIONS_F);
+  res.json(transactions);
 });
 
-app.post("/admin/orders/updateStatus", (req, res) => {
-    const { id, newStatus } = req.body;
-    let transactions = readJSON(CART);
-    let orders = readJSON(ORDERS);
-
-    const order = transactions.find(o => o.id === id);
-    const track = orders.find(o => o.id === id);
-
-    if (!order) return res.status(404).json({ message: "Order not found" });
-
-    order.status = newStatus;
-    writeJSON(CART, transactions);
-
-    track.status = newStatus;
-    track.history.push({ status: newStatus, date: new Date().toISOString() });
-    writeJSON(ORDERS, orders);
-
-    res.json({ message: "Order status updated" });
+// --- ADMIN: update transaction status ---
+app.post('/transactions/update', (req, res) => {
+  const { id, status } = req.body;
+  const transactions = readJSON(TRANSACTIONS_F);
+  const t = transactions.find(x => x.id === id);
+  if (!t) return res.status(404).json({ success: false, message: 'Transaction not found' });
+  if (t.status === 'Completed' || t.status === 'completed') {
+    return res.status(400).json({ success: false, message: 'Cannot modify completed transaction' });
+  }
+  t.status = status;
+  // append history (optional)
+  t.history = t.history || [];
+  t.history.push({ status, date: new Date().toISOString() });
+  writeJSON(TRANSACTIONS_F, transactions);
+  res.json({ success: true, transaction: t });
 });
 
-app.listen(PORT, () => console.log("Backend running on port " + PORT));
+// Health
+app.get('/', (req, res) => res.send('ATK backend OK'));
+
+// Start
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Server running on port', PORT));
